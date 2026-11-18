@@ -1,0 +1,46 @@
+name: Build plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Engine tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Load plugin like a DAW and check MIDI output
+        run: build/host_test_artefacts/Release/host_test.exe build/Guitar2MIDI_artefacts/Release/VST3/Guitar2MIDI.vst3
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item -Recurse "build/Guitar2MIDI_artefacts/Release/VST3/Guitar2MIDI.vst3" out/
+          Copy-Item "build/Guitar2MIDI_artefacts/Release/Standalone/Guitar2MIDI.exe" out/
+          Copy-Item "docs/INSTALL_RU.md" out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Guitar2MIDI-Windows
+          path: out
+
+      # Third-party plugin validator (Tracktion pluginval). Runs after upload,
+      # so the plugin is downloadable even if the validator nitpicks.
+      - name: Validate with pluginval
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          ./pluginval/pluginval.exe --strictness-level 8 --validate-in-process --skip-gui-tests --timeout-ms 300000 "build/Guitar2MIDI_artefacts/Release/VST3/Guitar2MIDI.vst3"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
